@@ -13,7 +13,7 @@ import re
 import numpy as np
 import pandas as pd
 import numpy.ma as ma
-import clustering_methods as cl
+import partitioning_methods as cl
 import delay_embedding as embed
 import operator_calculations as op_calc
 import stats
@@ -68,6 +68,7 @@ def calc_entropy_from_data(feats, sample_size,lengths_all,params):
     feats_[:,1] = (feats_[:,1] - ma.mean(feats_[:,1]))/ma.std(feats_[:,1])
 
     H = []
+    #for kf,f0 in enumerate(np.arange(0,data_bootstrap.shape[0],div)):
     print('Starting delay {}, clusters {}:'.format(K, N_cluster), feats_.shape, flush=True)
     if ma.count(feats_,axis=0)[0]>min_count:
         traj_matrix = embed.trajectory_matrix(feats_,K=K-1)
@@ -88,72 +89,38 @@ def main(argv):
     parser.add_argument('-seeds','--Seeds',help="Number of seeds to evaluate over",type=int,default=10)
     parser.add_argument('-recs','--Recs',help="Number of fish to sample from each morphotype",default=100,type=int)
     parser.add_argument('-dn','--DatasetName',help="Name of the dataset to save under", default='SF_CF_test',type=str)
-    parser.add_argument('-out','--Out',help="path save",default='./Results/',type=str)
+    parser.add_argument('-out','--Out',help="path save",default='/flash/StephensU/Gautam/HMD/Results/',type=str)
 
     args=parser.parse_args()
     
     ## Load Data
-    path_to_filtered_data = "/Users/gautam.sridhar/Documents/MATLAB/Ecoli/"
-    file_name = path_to_filtered_data + args.DatasetName + '.mat'
+    file_name = args.Out + args.DatasetName + '/bacteria_all_data.h5'
 
-    fps = 10
-    xy_recs = []
-    data = sio.loadmat(file_name,simplify_cells=True)
+    f = h5py.File(file_name,'r')
+    lengths_all = np.array(f['MetaData/lengths_data'],dtype=int)
+    feats_all = ma.array(f['feats'],dtype=float)
 
-    lengths_all = []
-    
-    tracks = data['tracks']
-
-    for track in tracks:
-        lengths_all.append(len(track['x']))
 
     feats = []
-
-    for i,track in enumerate(tracks):
-        x = track['x']
-        y = track['y']
-
-        xy = np.vstack([x,y]).T/fps
-        vX_ = np.diff(xy,axis=0)
-
-        vx_pa = ma.zeros(vX_.shape[0])
-        vx_pp = ma.zeros(vX_.shape[0])
-
-        psi = ma.zeros(vX_.shape[0])
-        psi[:] = ma.arctan2(vX_[:,1],vX_[:,0])
-
-        psi_unwrap = unwrapma(psi)
-        dpsi = ma.zeros(vX_.shape[0])
-        dpsi[1:] = psi_unwrap[1:]-psi_unwrap[:-1]
-        dpsi[0] = ma.masked
-        
-        s = ma.zeros(vX_.shape[0])
-        s = ma.sqrt(vX_[:,0]**2+vX_[:,1]**2)
-        s[0] = ma.masked
-        
-        vx_pa = s*np.cos(dpsi)
-        vx_pp = s*np.sin(dpsi)
-
-        vx_pa[-1] = ma.masked
-        vx_pp[-1] = ma.masked
-
-        feats.append(np.vstack([vx_pa,vx_pp]).T)
-        
-        # feats[i,:lengths_all[i],0] = vx_pa
-        # feats[i,:lengths_all[i],1] = vx_pp
-    
+    for i in range(len(lengths_all)):
+        feats.append(feats_all[i,:lengths_all[i],:])
+   
     feats = np.array(feats,dtype=object)
 
     min_count=200
-    n_seeds = np.random.randint(0,10000,size=args.Seeds) # number of seeds for checking randomness
-    K_range = np.arange(1,13,1) #range of delays
-    n_clusters=np.arange(50,2000,150) #number of partitions to explore
+    n_seeds = np.array([args.Seeds])#np.random.randint(0,10000,size=args.Seeds) # number of seeds for checking randomness
+    K_range = np.arange(1,12,1) #range of delays
+    n_clusters=np.arange(50,3000,200) #number of partitions to explore
+
+    # bootstrap_range = (pca_fish.shape[0]//args.Div)*args.Div
+    # divs = np.arange(0,bootstrap_range,args.Div)
 
     params = []
     for s in n_seeds:
         for k in K_range:
             for cs in n_clusters:
                 params.append([s,k,cs])
+    #print(params)
 
     h_K = ma.zeros((len(n_seeds),len(K_range),len(n_clusters)))
     calc_ent = functools.partial(calc_entropy_from_data, feats, args.Recs, lengths_all)
@@ -183,7 +150,7 @@ def main(argv):
         os.makedirs(save_path)
 
     print('Saving results ...', flush=True)
-    f = h5py.File(args.Out+ args.DatasetName + '/Entropy/Entropy_seeds_delays_clusters.h5','w')
+    f = h5py.File(args.Out+ args.DatasetName + '/Entropy/Entropy_seeds_delays_clusters_seed{}.h5'.format(args.Seeds),'w')
     entropies_ = f.create_dataset('entropies',h_K.shape)
     entropies_[...] = h_K
     n_seeds_ = f.create_dataset('seeds',n_seeds.shape)
@@ -199,3 +166,4 @@ def main(argv):
 
 if __name__ == "__main__":
     main(sys.argv)
+
